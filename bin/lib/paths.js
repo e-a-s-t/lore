@@ -7,6 +7,7 @@ export const TYPE_PREFIX = {
   stories: "STORY",
   adrs: "ADR",
   tests: "TEST",
+  features: "FEATURE",
 };
 
 export function lorePath(root, ...parts) {

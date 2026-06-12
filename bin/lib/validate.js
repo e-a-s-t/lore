@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import matter from "gray-matter";
 
-const TYPES = ["requirements", "stories", "adrs", "tests"];
+const TYPES = ["requirements", "stories", "adrs", "tests", "features"];
 
 const REQUIRED_FIELDS = [
   "id",

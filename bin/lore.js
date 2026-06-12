@@ -107,6 +107,19 @@ program
   });
 
 program
+  .command("feature")
+  .argument("<action>", "new|list")
+  .argument("[title]", "feature title")
+  .option("-i, --id <id>", "explicit id")
+  .description("manage features")
+  .action(async (action, title, options) => {
+    if (action === "new")
+      return createItem(process.cwd(), "features", title, options.id);
+    if (action === "list") return listItems(process.cwd(), "features");
+    throw new Error(`Unknown feature action: ${action}`);
+  });
+
+program
   .command("trace")
   .description("show requirement traceability")
   .action(async () => printTrace(await readAllItems(process.cwd())));

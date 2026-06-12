@@ -5,5 +5,6 @@ export function renderTemplate(type, item) {
   if (type === 'stories') return `${base}\n## User Story\n\nAs a ...\nI want ...\nSo that ...\n\n## Acceptance Criteria\n\n- [ ] TBD\n`;
   if (type === 'adrs') return `${base}\n## Context\n\nTBD\n\n## Decision\n\nTBD\n\n## Consequences\n\nTBD\n\n## Alternatives Considered\n\n- TBD\n`;
   if (type === 'tests') return `${base}\n## Test Case\n\nTBD\n\n## Expected Result\n\nTBD\n`;
+  if (type === 'features') return `${base}\n## Feature\n\nTBD\n\n## Included Artifacts\n\n- TBD\n`;
   throw new Error(`Unknown type: ${type}`);
 }

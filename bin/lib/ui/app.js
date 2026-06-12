@@ -7,6 +7,7 @@ const typeLabels = {
   stories: "Stories",
   adrs: "ADRs",
   tests: "Tests",
+  features: "Features",
 };
 
 let lore = {};
@@ -175,6 +176,18 @@ const renderRelationsView = (item) => {
     title: r.target?.title || "",
   }));
 
+  const featureBacklinks = incomingRaw.filter((r) => r.source._type === "features");
+  const featureBacklinksHtml = featureBacklinks.length
+    ? featureBacklinks.map((r) => `
+        <div class="relation">
+          <span class="muted">Used by Features</span><br />
+          <span class="pill" onclick="selectById('${esc(r.source.id)}')">
+            ${esc(r.source.id)}${r.source.title ? " — " + esc(r.source.title) : ""}
+          </span>
+        </div>
+      `).join("")
+    : '<div class="muted">No feature backlinks.</div>';
+
   const treeHtml = `
     <div class="relation-tree">
       <div class="tree-side">
@@ -218,6 +231,9 @@ const renderRelationsView = (item) => {
 
     <h4>Bidirectional</h4>
     ${bothHtml}
+
+    <h4>Used by Features</h4>
+    ${featureBacklinksHtml}
 
     <div class="relations-columns">
       <div>
@@ -286,6 +302,7 @@ function renderList() {
     stories: items.filter((item) => item._type === "stories"),
     adrs: items.filter((item) => item._type === "adrs"),
     tests: items.filter((item) => item._type === "tests"),
+    features: items.filter((item) => item._type === "features"),
   };
 
   const groupHtml = Object.entries(grouped)
@@ -352,7 +369,7 @@ async function start() {
   const response = await fetch("/api/lore");
   lore = await response.json();
 
-  allItems = ["requirements", "stories", "adrs", "tests"].flatMap((type) =>
+  allItems = ["requirements", "stories", "adrs", "tests", "features"].flatMap((type) =>
     (lore[type] || []).map((item) => ({ ...item, _type: type })),
   );
 
@@ -365,6 +382,7 @@ async function start() {
           <option value="stories">Stories</option>
           <option value="adrs">ADRs</option>
           <option value="tests">Tests</option>
+          <option value="features">Features</option>
         </select>
 
         <input id="search" placeholder="Search lore..." oninput="searchLore()" />

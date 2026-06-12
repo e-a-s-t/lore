@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { lorePath } from './paths.js';
 
-const dirs = ['requirements', 'stories', 'adrs', 'tests', 'templates'];
+const dirs = ['requirements', 'stories', 'adrs', 'tests', 'features', 'templates'];
 
 export function initLore(root) {
   for (const dir of dirs) fs.mkdirSync(lorePath(root, dir), { recursive: true });
@@ -13,7 +13,7 @@ export function initLore(root) {
 
   const readme = lorePath(root, 'README.md');
   if (!fs.existsSync(readme)) {
-    fs.writeFileSync(readme, '# Project Lore\n\nRequirements, stories, ADRs and tests for this repository.\n');
+    fs.writeFileSync(readme, '# Project Lore\n\nRequirements, stories, ADRs, tests and features for this repository.\n');
   }
 
   console.log('Created .lore/');

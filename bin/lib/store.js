@@ -3,7 +3,7 @@ import path from 'node:path';
 import matter from 'gray-matter';
 import { lorePath } from './paths.js';
 
-export const TYPES = ['requirements', 'stories', 'adrs', 'tests'];
+export const TYPES = ['requirements', 'stories', 'adrs', 'tests', 'features'];
 
 export function readItems(root, type) {
   const dir = lorePath(root, type);

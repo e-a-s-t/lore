@@ -10,8 +10,15 @@ export function printTrace(all) {
     for (const story of ids(req.related_stories)) console.log(` ├─ ${story}`);
     for (const test of ids(req.related_tests)) console.log(` └─ ${test}`);
   }
-}
 
+  for (const feature of all.features || []) {
+    console.log(`\n${feature.id} ${feature.title}`);
+    for (const req of ids(feature.related_requirements)) console.log(` ├─ ${req}`);
+    for (const adr of ids(feature.related_adrs)) console.log(` ├─ ${adr}`);
+    for (const story of ids(feature.related_stories)) console.log(` ├─ ${story}`);
+    for (const test of ids(feature.related_tests)) console.log(` └─ ${test}`);
+  }
+}
 export function printGaps(all) {
   let gaps = 0;
   for (const req of all.requirements) {

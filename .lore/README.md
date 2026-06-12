@@ -1,6 +1,6 @@
 # Project Lore
 
-Requirements, stories, ADRs and tests for this repository.
+Requirements, stories, ADRs, tests and features for this repository.
 # Lore project knowledge
 
 This directory contains Lore's own requirements, ADRs, user stories and tests.
