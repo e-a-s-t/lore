@@ -16,6 +16,18 @@
 
         <div id="app">Loading...</div>
 
+        <script type="module">
+            import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+
+            mermaid.initialize({
+                startOnLoad: false,
+                theme: "dark",
+                securityLevel: "loose",
+            });
+
+            window.mermaid = mermaid;
+        </script>
+
         <script type="module" src="/app.js"></script>
     </body>
 </html>

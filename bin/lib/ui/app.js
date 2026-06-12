@@ -42,6 +42,63 @@ const getVisibleItems = () => {
   });
 };
 
+const mermaidSafeId = (id) => String(id).replace(/[^a-zA-Z0-9_]/g, "_");
+
+const mermaidSafeLabel = (value) =>
+  String(value ?? "")
+    .replaceAll('"', "'")
+    .replaceAll("[", "(")
+    .replaceAll("]", ")")
+    .replaceAll("{", "(")
+    .replaceAll("}", ")")
+    .replaceAll("|", "-");
+
+const renderMermaidGraph = async (item) => {
+  const container = document.getElementById("relationGraph");
+  if (!container || !window.mermaid || !item) return;
+
+  const outgoing = uniqueById(outgoingRelations(item, findItem));
+  const incoming = uniqueById(incomingRelations(item, allItems));
+
+  const currentId = mermaidSafeId(item.id);
+  const currentLabel = mermaidSafeLabel(`${item.id} - ${item.title || ""}`);
+
+  const lines = ["flowchart LR", `  ${currentId}["${currentLabel}"]:::current`];
+
+  incoming.forEach((r) => {
+    const sourceId = mermaidSafeId(r.source.id);
+    const sourceLabel = mermaidSafeLabel(
+      `${r.source.id} - ${r.source.title || ""}`,
+    );
+
+    lines.push(`  ${sourceId}["${sourceLabel}"] --> ${currentId}`);
+  });
+
+  outgoing.forEach((r) => {
+    const target = r.target || { id: r.id, title: "Missing reference" };
+    const targetId = mermaidSafeId(target.id);
+    const targetLabel = mermaidSafeLabel(
+      `${target.id} - ${target.title || ""}`,
+    );
+
+    lines.push(`  ${currentId} --> ${targetId}["${targetLabel}"]`);
+  });
+
+  lines.push("  classDef current fill:#2a2115,stroke:#d8b98a,color:#d8b98a;");
+  lines.push("  classDef default fill:#181818,stroke:#444,color:#9cdcfe;");
+
+  const graph = lines.join("\n");
+  const graphId = "relationGraphSvg-" + Date.now();
+
+  try {
+    const result = await window.mermaid.render(graphId, graph);
+    container.innerHTML = result.svg;
+  } catch (error) {
+    container.innerHTML =
+      '<pre class="error">' + esc(error.message || String(error)) + "</pre>";
+  }
+};
+
 const renderRelationsView = (item) => {
   const outgoingRaw = outgoingRelations(item, findItem);
   const incomingRaw = incomingRelations(item, allItems);
@@ -174,8 +231,8 @@ const renderRelationsView = (item) => {
       </div>
     </div>
 
-    <h4>Visual tree</h4>
-    ${treeHtml}
+    <h4>Graph</h4>
+    <div id="relationGraph" class="mermaid-graph"></div>
   `;
 };
 
@@ -218,9 +275,10 @@ const renderDetail = (item) => {
   `;
 
   document.getElementById("relations").innerHTML = renderRelationsView(item);
+  renderMermaidGraph(item);
 };
 
-const renderList = () => {
+function renderList() {
   const items = getVisibleItems();
 
   const grouped = {
@@ -253,7 +311,7 @@ const renderList = () => {
 
   document.getElementById("list").innerHTML =
     groupHtml || '<div class="muted">No matching lore items.</div>';
-};
+}
 
 window.selectType = (type) => {
   currentType = type;

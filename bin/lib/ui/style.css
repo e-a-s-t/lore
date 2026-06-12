@@ -247,3 +247,21 @@ pre,
     color: #777;
     font-size: 0.85rem;
 }
+
+.mermaid-graph {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: #181818;
+    border: 1px solid #333;
+    border-radius: 12px;
+    overflow-x: auto;
+}
+
+.mermaid-graph svg {
+    max-width: 100%;
+    height: auto;
+}
+
+.error {
+    color: #ff7777;
+}
