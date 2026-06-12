@@ -6,13 +6,14 @@ import { importRequirementsCsv } from "./lib/import.js";
 import { listItems, readAllItems } from "./lib/store.js";
 import { printTrace, printGaps } from "./lib/trace.js";
 import { startUi } from "./lib/ui.js";
+import pkg from "../package.json" with { type: "json" };
 
 const program = new Command();
 
 program
   .name("lore")
-  .description("Git-native requirements, ADRs, stories and tests")
-  .version("0.1.0");
+  .description("Git-native project memory")
+  .version(pkg.version);
 
 program
   .command("init")
