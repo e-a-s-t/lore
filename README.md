@@ -155,3 +155,7 @@ Code is the implementation.
 Documentation explains the implementation.
 
 `.lore` is the memory of the system.
+
+## License
+
+MIT
