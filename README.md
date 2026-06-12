@@ -153,7 +153,7 @@ It is a structure for project knowledge.
 Code is the implementation.
 
 Documentation explains the implementation.
-
+cd ..
 `.lore` is the memory of the system.
 
 ## License
