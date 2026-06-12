@@ -1,0 +1,3 @@
+id,title,description,source,priority,status
+REQ-001,Audit logging,All access to sensitive data must be logged,LCCP,High,Draft
+REQ-002,Tenant isolation,Tenants must be isolated using authorization and namespace boundaries,LCCP,High,Draft
