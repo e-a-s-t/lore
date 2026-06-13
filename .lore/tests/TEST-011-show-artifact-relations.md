@@ -6,6 +6,8 @@ related_requirements:
   - REQ-024
 related_stories:
   - STORY-010
+related_adrs: []
+related_tests: []
 ---
 
 # TEST-011 - Show Artifact Relations

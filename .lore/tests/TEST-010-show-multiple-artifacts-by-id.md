@@ -1,5 +1,3 @@
-
-```markdown
 ---
 id: TEST-010
 title: Show multiple artifacts by ID
@@ -10,6 +8,8 @@ related_requirements:
 related_stories:
   - STORY-009
   - STORY-010
+related_adrs: []
+related_tests: []
 ---
 
 # TEST-010 - Show Multiple Artifacts by ID

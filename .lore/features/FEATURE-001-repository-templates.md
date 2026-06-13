@@ -50,4 +50,4 @@ Repository templates should be treated as project knowledge and stored under:
 
 ```text
 .lore/templates/
-``
+```

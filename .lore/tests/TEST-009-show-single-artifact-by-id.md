@@ -7,6 +7,8 @@ related_requirements:
   - REQ-023
 related_stories:
   - STORY-009
+related_adrs: []
+related_tests: []
 ---
 
 # TEST-009 - Show Single Artifact by ID

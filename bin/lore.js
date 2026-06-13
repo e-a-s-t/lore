@@ -5,6 +5,7 @@ import { createItem } from "./lib/create.js";
 import { importRequirementsCsv } from "./lib/import.js";
 import { listItems, readAllItems, readAllArtifacts } from "./lib/store.js";
 import { printTrace, printGaps, directRelations, recursiveRelations } from "./lib/trace.js";
+import { printArtifacts, useColor } from "./lib/show.js";
 import { startUi } from "./lib/ui.js";
 import pkg from "../package.json" with { type: "json" };
 
@@ -122,20 +123,78 @@ program
 program
   .command("show")
   .argument("<id...>", "artifact id(s)")
+  .option("--raw", "show stored markdown")
   .option("--relations", "show direct relations")
   .option("--recursive", "expand related artifacts recursively")
+  .option("--full", "keep recursive full-body output")
   .description("show artifacts by id")
   .action(async (ids, options) => {
+    if (options.raw && (options.relations || options.recursive || options.full)) {
+      throw new Error("--raw cannot be combined with --relations, --recursive, or --full");
+    }
+
     const root = process.cwd();
     const allArtifacts = readAllArtifacts(root);
     const byId = new Map(allArtifacts.map((artifact) => [artifact.id, artifact]));
     const missing = [];
     const printed = new Set();
+    const color = useColor(process.stdout);
 
     function emitArtifact(artifact) {
       if (!artifact || printed.has(artifact.id)) return;
       printed.add(artifact.id);
-      console.log(artifact.text.trimEnd());
+      printArtifacts([artifact], { raw: options.raw, color });
+    }
+
+    function relationTypeLabel(type) {
+      return {
+        requirements: "Requirements",
+        stories: "Stories",
+        adrs: "ADRs",
+        tests: "Tests",
+        features: "Features",
+      }[type] || type;
+    }
+
+    function relationEntry(artifact) {
+      const status = artifact.status ? ` [${artifact.status}]` : "";
+      return `${artifact.id} - ${artifact.title}${status}`;
+    }
+
+    function emitRecursiveContext(start) {
+      emitArtifact(start);
+
+      const related = recursiveRelations(start, (id) => byId.get(id), allArtifacts)
+        .slice(1)
+        .filter((artifact) => artifact && artifact.id !== start.id);
+      const unique = new Map();
+      for (const artifact of related) {
+        if (!unique.has(artifact.id)) unique.set(artifact.id, artifact);
+      }
+
+      const grouped = new Map([
+        ["requirements", []],
+        ["stories", []],
+        ["adrs", []],
+        ["tests", []],
+        ["features", []],
+      ]);
+
+      for (const artifact of unique.values()) {
+        if (!grouped.has(artifact.type)) continue;
+        grouped.get(artifact.type).push(artifact);
+      }
+
+      const orderedGroups = [...grouped.entries()].filter(([, items]) => items.length > 0);
+      if (orderedGroups.length === 0) return;
+
+      console.log("Related:");
+      for (const [type, items] of orderedGroups) {
+        console.log(`${relationTypeLabel(type)}:`);
+        for (const artifact of items.sort((a, b) => String(a.id).localeCompare(String(b.id)))) {
+          console.log(`- ${relationEntry(artifact)}`);
+        }
+      }
     }
 
     function emitRelations(artifact) {
@@ -155,9 +214,14 @@ program
     }
 
     function emitRecursive(start) {
-      for (const artifact of recursiveRelations(start, (id) => byId.get(id), allArtifacts)) {
-        emitArtifact(artifact);
+      if (options.full) {
+        for (const artifact of recursiveRelations(start, (id) => byId.get(id), allArtifacts)) {
+          emitArtifact(artifact);
+        }
+        return;
       }
+
+      emitRecursiveContext(start);
     }
 
     for (let index = 0; index < ids.length; index++) {

@@ -7,6 +7,8 @@ related_requirements:
   - REQ-026
 related_stories:
   - STORY-010
+related_adrs: []
+related_tests: []
 ---
 
 # TEST-012 - Show Recursive Artifact Context
