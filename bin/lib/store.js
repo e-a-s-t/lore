@@ -4,6 +4,13 @@ import matter from 'gray-matter';
 import { lorePath } from './paths.js';
 
 export const TYPES = ['requirements', 'stories', 'adrs', 'tests', 'features'];
+export const TYPE_PREFIXES = {
+  REQ: 'requirements',
+  STORY: 'stories',
+  ADR: 'adrs',
+  TEST: 'tests',
+  FEATURE: 'features',
+};
 
 export function readItems(root, type) {
   const dir = lorePath(root, type);
@@ -21,6 +28,46 @@ export function readItems(root, type) {
       };
     })
     .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+}
+
+export function readArtifactFile(file) {
+  const text = fs.readFileSync(file, 'utf8');
+  const parsed = matter(text);
+
+  return {
+    file,
+    text,
+    body: parsed.content.trim(),
+    ...parsed.data,
+  };
+}
+
+export function typeForId(id) {
+  const prefix = String(id).split('-')[0];
+  return TYPE_PREFIXES[prefix] || null;
+}
+
+export function readArtifact(root, id) {
+  const type = typeForId(id);
+  if (!type) return null;
+
+  const dir = lorePath(root, type);
+  if (!fs.existsSync(dir)) return null;
+
+  for (const file of fs.readdirSync(dir).filter((name) => name.endsWith('.md'))) {
+    const fullPath = path.join(dir, file);
+    const artifact = readArtifactFile(fullPath);
+    if (artifact.id === id) return artifact;
+  }
+
+  return null;
+}
+
+export function readAllArtifacts(root) {
+  return TYPES.flatMap((type) => readItems(root, type).map((item) => ({
+    ...item,
+    text: fs.readFileSync(item.file, 'utf8'),
+  })));
 }
 
 export function listItems(root, type) {

@@ -1,6 +1,56 @@
+const RELATION_FIELDS = [
+  'related_requirements',
+  'related_adrs',
+  'related_stories',
+  'related_tests',
+];
+
 function ids(values) {
   if (!Array.isArray(values)) return [];
   return values.filter(Boolean);
+}
+
+export function outgoingRelationIds(item) {
+  return RELATION_FIELDS.flatMap((field) =>
+    ids(item[field]).map((id) => ({ direction: 'outgoing', field, id })),
+  );
+}
+
+export function incomingRelationIds(item, allItems) {
+  const items = Array.isArray(allItems) ? allItems : [];
+  return items.flatMap((source) =>
+    RELATION_FIELDS.flatMap((field) =>
+      ids(source[field]).includes(item.id)
+        ? [{ direction: 'incoming', field, id: source.id }]
+        : [],
+    ),
+  );
+}
+
+export function directRelations(item, allItems) {
+  return [...outgoingRelationIds(item), ...incomingRelationIds(item, allItems)];
+}
+
+export function recursiveRelations(item, findItem, allItems = []) {
+  const seen = new Set();
+  const order = [];
+
+  function nextIds(current) {
+    const outgoing = outgoingRelationIds(current).map((rel) => rel.id);
+    const incoming = incomingRelationIds(current, allItems).map((rel) => rel.id);
+    return [...outgoing, ...incoming];
+  }
+
+  function visit(current) {
+    if (!current || seen.has(current.id)) return;
+    seen.add(current.id);
+    order.push(current);
+
+    for (const id of nextIds(current)) visit(findItem(id));
+  }
+
+  visit(item);
+  return order;
 }
 
 export function printTrace(all) {

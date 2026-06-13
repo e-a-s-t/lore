@@ -3,8 +3,8 @@ import { Command } from "commander";
 import { initLore } from "./lib/init.js";
 import { createItem } from "./lib/create.js";
 import { importRequirementsCsv } from "./lib/import.js";
-import { listItems, readAllItems } from "./lib/store.js";
-import { printTrace, printGaps } from "./lib/trace.js";
+import { listItems, readAllItems, readAllArtifacts } from "./lib/store.js";
+import { printTrace, printGaps, directRelations, recursiveRelations } from "./lib/trace.js";
 import { startUi } from "./lib/ui.js";
 import pkg from "../package.json" with { type: "json" };
 
@@ -117,6 +117,72 @@ program
       return createItem(process.cwd(), "features", title, options.id);
     if (action === "list") return listItems(process.cwd(), "features");
     throw new Error(`Unknown feature action: ${action}`);
+  });
+
+program
+  .command("show")
+  .argument("<id...>", "artifact id(s)")
+  .option("--relations", "show direct relations")
+  .option("--recursive", "expand related artifacts recursively")
+  .description("show artifacts by id")
+  .action(async (ids, options) => {
+    const root = process.cwd();
+    const allArtifacts = readAllArtifacts(root);
+    const byId = new Map(allArtifacts.map((artifact) => [artifact.id, artifact]));
+    const missing = [];
+    const printed = new Set();
+
+    function emitArtifact(artifact) {
+      if (!artifact || printed.has(artifact.id)) return;
+      printed.add(artifact.id);
+      console.log(artifact.text.trimEnd());
+    }
+
+    function emitRelations(artifact) {
+      const relations = directRelations(artifact, allArtifacts);
+
+      if (relations.length === 0) {
+        console.log('Relations: none');
+        return;
+      }
+
+      console.log('Relations:');
+      for (const rel of relations) {
+        const marker = byId.has(rel.id) ? rel.id : `${rel.id} [missing]`;
+        const prefix = rel.direction === 'incoming' ? '<-' : '->';
+        console.log(`${prefix} ${rel.field}: ${marker}`);
+      }
+    }
+
+    function emitRecursive(start) {
+      for (const artifact of recursiveRelations(start, (id) => byId.get(id), allArtifacts)) {
+        emitArtifact(artifact);
+      }
+    }
+
+    for (let index = 0; index < ids.length; index++) {
+      const id = ids[index];
+      const artifact = byId.get(id);
+      if (!artifact) {
+        missing.push(id);
+        console.error(`lore show: missing artifact ${id}`);
+        continue;
+      }
+
+      if (options.recursive) {
+        emitRecursive(artifact);
+      } else {
+        emitArtifact(artifact);
+      }
+
+      if (options.relations) {
+        emitRelations(artifact);
+      }
+
+      if (index < ids.length - 1) console.log('---');
+    }
+
+    if (missing.length > 0) process.exitCode = 1;
   });
 
 program
