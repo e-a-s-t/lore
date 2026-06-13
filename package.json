@@ -1,6 +1,6 @@
 {
   "name": "lore",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Git-native requirements, ADRs, stories and tests stored as project lore.",
   "type": "module",
   "bin": {
