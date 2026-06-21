@@ -4,7 +4,7 @@ title: Ratatui artifact browser
 status: Accepted
 related_requirements: [REQ-001, REQ-002, REQ-003, REQ-004, REQ-005]
 related_adrs: [ADR-002]
-related_stories: []
+related_stories: [STORY-001]
 related_tests: [TEST-004]
 ---
 

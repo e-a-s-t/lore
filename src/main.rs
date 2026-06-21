@@ -16,7 +16,8 @@ use std::io::{self, Stdout};
 
 fn main() -> Result<()> {
     let root = std::env::current_dir()?;
-    let mut app = App::new(root)?;
+    let mut app = App::new(root.clone())?;
+    let mut watcher = event::ReloadWatcher::new(root)?;
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -24,7 +25,7 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run(&mut terminal, &mut app);
+    let result = run(&mut terminal, &mut app, &mut watcher);
 
     disable_raw_mode()?;
     execute!(
@@ -40,11 +41,12 @@ fn main() -> Result<()> {
 fn run(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     app: &mut App,
+    watcher: &mut event::ReloadWatcher,
 ) -> anyhow::Result<()> {
     while !app.should_quit {
         terminal.draw(|frame| ui::draw(frame, app))?;
 
-        event::handle_events(app)?;
+        event::handle_events(app, watcher)?;
     }
 
     Ok(())

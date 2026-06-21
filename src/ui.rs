@@ -1,6 +1,6 @@
 use crate::app::App;
 use ratatui::{
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
@@ -17,8 +17,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Percentage(30),
-            Constraint::Percentage(25),
-            Constraint::Percentage(45),
+            Constraint::Percentage(30),
+            Constraint::Percentage(40),
         ])
         .split(root[0]);
 
@@ -28,11 +28,13 @@ pub fn draw(frame: &mut Frame, app: &App) {
     draw_status(frame, app, root[1]);
 }
 
-fn draw_artifacts(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let items: Vec<ListItem> = app
+fn draw_artifacts(frame: &mut Frame, app: &App, area: Rect) {
+    let features = app
         .artifacts
         .iter()
         .enumerate()
+        .filter(|(_, artifact)| artifact.is_feature());
+    let items: Vec<ListItem> = features
         .map(|(index, artifact)| {
             let line = if index == app.selected {
                 Line::from(vec![Span::styled(
@@ -46,27 +48,33 @@ fn draw_artifacts(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         })
         .collect();
 
-    let list = List::new(items).block(Block::default().title("Artifacts").borders(Borders::ALL));
+    let list = List::new(items).block(Block::default().title("Features").borders(Borders::ALL));
     frame.render_widget(list, area);
 }
 
-fn draw_relations(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let relations = app
-        .selected_artifact()
-        .map(|artifact| artifact.relations())
-        .unwrap_or_default();
+fn draw_relations(frame: &mut Frame, app: &App, area: Rect) {
+    let mut items = Vec::new();
+    if let Some(artifact) = app.selected_artifact() {
+        for (group, ids) in artifact.relation_groups() {
+            items.push(ListItem::new(Line::from(Span::styled(
+                group,
+                Style::default().add_modifier(Modifier::BOLD),
+            ))));
+            for id in ids {
+                items.push(ListItem::new(format!("  {id}")));
+            }
+        }
+    }
 
-    let content = if relations.is_empty() {
-        vec![ListItem::new("No relations")]
-    } else {
-        relations.into_iter().map(ListItem::new).collect()
-    };
+    if items.is_empty() {
+        items.push(ListItem::new("No relations"));
+    }
 
-    let list = List::new(content).block(Block::default().title("Relations").borders(Borders::ALL));
+    let list = List::new(items).block(Block::default().title("Related").borders(Borders::ALL));
     frame.render_widget(list, area);
 }
 
-fn draw_preview(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+fn draw_preview(frame: &mut Frame, app: &App, area: Rect) {
     let text = match app.selected_artifact() {
         Some(artifact) => format!(
             "{}\n{}\nStatus: {}\n\n{}",
@@ -82,13 +90,14 @@ fn draw_preview(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     frame.render_widget(paragraph, area);
 }
 
-fn draw_status(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+fn draw_status(frame: &mut Frame, app: &App, area: Rect) {
     let status = format!(
-        " q/Esc quit | ↑/↓ or j/k navigate | v validate | cwd: {} | {} ",
+        " q/Esc quit | ↑/↓ or j/k navigate | Enter open | b back | v validate | cwd: {} | {} ",
         app.root.display(),
         app.message
     );
 
-    let paragraph = Paragraph::new(status).block(Block::default().title("Status").borders(Borders::ALL));
+    let paragraph =
+        Paragraph::new(status).block(Block::default().title("Status").borders(Borders::ALL));
     frame.render_widget(paragraph, area);
 }

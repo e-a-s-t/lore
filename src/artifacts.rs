@@ -32,14 +32,28 @@ impl Artifact {
         format!("{}  {}", self.meta.id, self.meta.title)
     }
 
-    pub fn relations(&self) -> Vec<String> {
-        let mut relations = Vec::new();
-        relations.extend(self.meta.related_features.iter().map(|id| format!("FEATURE  {id}")));
-        relations.extend(self.meta.related_requirements.iter().map(|id| format!("REQ      {id}")));
-        relations.extend(self.meta.related_adrs.iter().map(|id| format!("ADR      {id}")));
-        relations.extend(self.meta.related_stories.iter().map(|id| format!("STORY    {id}")));
-        relations.extend(self.meta.related_tests.iter().map(|id| format!("TEST     {id}")));
-        relations
+    pub fn is_feature(&self) -> bool {
+        self.meta.id.starts_with("FEATURE")
+    }
+
+    pub fn relation_groups(&self) -> Vec<(&'static str, Vec<String>)> {
+        let mut groups = Vec::new();
+        if !self.meta.related_features.is_empty() {
+            groups.push(("Features", self.meta.related_features.clone()));
+        }
+        if !self.meta.related_requirements.is_empty() {
+            groups.push(("Requirements", self.meta.related_requirements.clone()));
+        }
+        if !self.meta.related_adrs.is_empty() {
+            groups.push(("ADRs", self.meta.related_adrs.clone()));
+        }
+        if !self.meta.related_stories.is_empty() {
+            groups.push(("Stories", self.meta.related_stories.clone()));
+        }
+        if !self.meta.related_tests.is_empty() {
+            groups.push(("Tests", self.meta.related_tests.clone()));
+        }
+        groups
     }
 }
 
@@ -74,4 +88,78 @@ pub fn load_lore(root: &Path) -> Result<Vec<Artifact>> {
 
     artifacts.sort_by(|a, b| a.meta.id.cmp(&b.meta.id));
     Ok(artifacts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn temp_repo() -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "lore-tui-test-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join(".lore")).unwrap();
+        root
+    }
+
+    fn write_artifact(root: &Path, name: &str, yaml: &str, body: &str) {
+        fs::write(
+            root.join(".lore").join(name),
+            format!("---\n{}\n---\n{}\n", yaml, body),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn loads_artifacts_from_lore_directory() {
+        let root = temp_repo();
+        write_artifact(
+            &root,
+            "feature.md",
+            "id: FEATURE-001\ntitle: Browser\nrelated_requirements: [REQ-001]",
+            "Body",
+        );
+        write_artifact(&root, "req.md", "id: REQ-001\ntitle: Load\n", "Req body");
+
+        let artifacts = load_lore(&root).unwrap();
+        assert_eq!(artifacts.len(), 2);
+        assert_eq!(artifacts[0].meta.id, "FEATURE-001");
+        assert_eq!(artifacts[1].meta.id, "REQ-001");
+    }
+
+    #[test]
+    fn groups_relations_by_type() {
+        let artifact = Artifact {
+            meta: Frontmatter {
+                id: "FEATURE-001".into(),
+                title: "Browser".into(),
+                related_requirements: vec!["REQ-001".into()],
+                related_adrs: vec!["ADR-001".into()],
+                related_stories: vec!["STORY-001".into()],
+                related_tests: vec!["TEST-001".into()],
+                related_features: vec!["FEATURE-002".into()],
+                ..Default::default()
+            },
+            body: String::new(),
+        };
+
+        assert_eq!(
+            artifact.relation_groups(),
+            vec![
+                ("Features", vec!["FEATURE-002".into()]),
+                ("Requirements", vec!["REQ-001".into()]),
+                ("ADRs", vec!["ADR-001".into()]),
+                ("Stories", vec!["STORY-001".into()]),
+                ("Tests", vec!["TEST-001".into()]),
+            ]
+        );
+    }
 }
