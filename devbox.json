@@ -30,9 +30,9 @@
       "test-cli": "cargo test -p lore-cli",
       "check-cli": "cargo check -p lore-cli",
 
-      "patch": "cargo release patch --no-publish",
-      "minor": "cargo release minor --no-publish",
-      "major": "cargo release major --no-publish"
+      "patch": "cargo release patch --no-publish --execute",
+      "minor": "cargo release minor --no-publish --execute",
+      "major": "cargo release major --no-publish --execute"
     }
   }
 }
