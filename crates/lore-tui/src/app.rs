@@ -1,5 +1,5 @@
 use crate::{
-    artifacts::{load_lore, Artifact},
+    artifacts::{Artifact, load_lore},
     commands,
 };
 use anyhow::Result;
@@ -231,16 +231,22 @@ mod tests {
     use crate::artifacts::{Artifact, Frontmatter};
     use std::{
         fs,
+        sync::atomic::{AtomicUsize, Ordering},
         time::{SystemTime, UNIX_EPOCH},
     };
 
+    static TEMP_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
     fn temp_repo() -> PathBuf {
+        let seq = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!(
-            "lore-tui-test-{}",
+            "lore-tui-test-{}-{}-{}",
+            std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
-                .as_nanos()
+                .as_nanos(),
+            seq
         ));
         fs::create_dir_all(root.join(".lore")).unwrap();
         root

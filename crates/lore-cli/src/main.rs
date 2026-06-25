@@ -1,11 +1,15 @@
-use std::{collections::HashSet, process::ExitCode};
+use std::{
+    collections::HashSet,
+    io::{self, IsTerminal, Write},
+    process::ExitCode,
+};
 
 use lore_core::{
-    create_artifact, discover_repository, find_artifact, init_workspace, link_artifacts,
-    list_artifacts, load_artifacts_unsorted, render_artifact_direct_relations,
-    render_artifact_list, render_artifact_raw, render_artifact_show, render_gaps, render_trace,
-    search_artifacts, unlink_artifacts, validate_repository, ArtifactKind, CreateArtifactOptions,
-    ValidationError,
+    ArtifactKind, CreateArtifactOptions, ValidationError, create_artifact, discover_repository,
+    find_artifact, init_workspace, link_artifacts, list_artifacts, load_artifacts_unsorted,
+    render_artifact_direct_relations, render_artifact_list, render_artifact_raw,
+    render_artifact_show, render_gaps, render_trace, repair_relationships, search_artifacts,
+    unlink_artifacts, validate_repository,
 };
 
 fn main() -> ExitCode {
@@ -21,7 +25,7 @@ fn main() -> ExitCode {
 fn run(args: Vec<String>) -> Result<i32, String> {
     match args.first().map(String::as_str) {
         Some("init") => init(&args[1..]),
-        Some("validate") => validate().map(|has_errors| if has_errors { 1 } else { 0 }),
+        Some("validate") => validate(&args[1..]).map(|has_errors| if has_errors { 1 } else { 0 }),
         Some("link") => relationship(RelationshipKind::Link, &args[1..]),
         Some("unlink") => relationship(RelationshipKind::Unlink, &args[1..]),
         Some("show") => show(&args[1..]),
@@ -51,7 +55,7 @@ fn print_help() {
     println!();
     println!("Project");
     println!("  lore init  create a .lore workspace");
-    println!("  lore validate  validate the repository");
+    println!("  lore validate [--fix]  validate the repository");
     println!();
     println!("Artifacts");
     println!("  lore req new <title>  create a requirement");
@@ -585,9 +589,29 @@ fn parse_relationship_args(args: &[String]) -> Result<Option<(String, String)>, 
     }
 }
 
-fn validate() -> Result<bool, String> {
+fn validate(args: &[String]) -> Result<bool, String> {
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        print_validate_help();
+        return Ok(false);
+    }
+    if let Some(flag) = args
+        .iter()
+        .find(|arg| arg.starts_with('-') && arg.as_str() != "--fix")
+    {
+        return Err(format!("unknown option `{flag}`"));
+    }
+
+    let fix = args.iter().any(|arg| arg == "--fix");
     let repository = discover_repository().map_err(|error| error.to_string())?;
-    let errors = validate_repository(&repository).map_err(|error| error.to_string())?;
+    let mut errors = validate_repository(&repository).map_err(|error| error.to_string())?;
+    let has_mismatches = errors
+        .iter()
+        .any(|error| matches!(error, ValidationError::RelationshipMismatch { .. }));
+
+    if has_mismatches && (fix || confirm_relationship_repair()?) {
+        repair_relationships(&repository).map_err(|error| error.to_string())?;
+        errors = validate_repository(&repository).map_err(|error| error.to_string())?;
+    }
 
     if errors.is_empty() {
         println!("Repository is valid");
@@ -599,6 +623,36 @@ fn validate() -> Result<bool, String> {
     }
     println!("Found {} validation error(s)", errors.len());
     Ok(true)
+}
+
+fn confirm_relationship_repair() -> Result<bool, String> {
+    if !io::stdin().is_terminal() {
+        return Ok(false);
+    }
+
+    println!("{}", relationship_repair_prompt());
+    io::stdout().flush().map_err(|error| error.to_string())?;
+
+    let mut answer = String::new();
+    io::stdin()
+        .read_line(&mut answer)
+        .map_err(|error| error.to_string())?;
+    let answer = answer.trim().to_ascii_lowercase();
+    Ok(answer.is_empty() || answer == "y" || answer == "yes")
+}
+
+fn relationship_repair_prompt() -> &'static str {
+    "Legacy artifact relationships found.\nMove them to the correct relationship fields? [Y/n]"
+}
+
+fn print_validate_help() {
+    println!("Usage: lore validate [options]");
+    println!();
+    println!("validate the repository");
+    println!();
+    println!("Options:");
+    println!("  --fix       repair legacy relationship fields");
+    println!("  -h, --help  display help for command");
 }
 
 #[allow(dead_code)]
@@ -742,7 +796,7 @@ mod tests {
         let text =
             fs::read_to_string(root.join(".lore/stories/STORY-123-sample-story.md")).unwrap();
         assert!(text.contains("id: STORY-123"));
-        assert!(text.contains("related_requirements:\n  - FEATURE-001"));
+        assert!(text.contains("related_features:\n  - FEATURE-001"));
     }
 
     #[test]
@@ -867,7 +921,7 @@ mod tests {
             &root,
             "requirements",
             "REQ-001-a.md",
-            "id: REQ-001\ntitle: Alpha\nstatus: Draft\nrelated_adrs: [ADR-001]\nrelated_stories: [STORY-001]\nrelated_tests: [TEST-001]",
+            "id: REQ-001\ntitle: Alpha\nstatus: Draft\nrelated_features: [FEATURE-001]\nrelated_adrs: [ADR-001]\nrelated_stories: [STORY-001]\nrelated_tests: [TEST-001]",
             "# REQ-001 - Alpha\n\n## Requirement\n\nBody",
         );
         write_artifact(
@@ -891,6 +945,13 @@ mod tests {
             "id: TEST-001\ntitle: Test\nstatus: Draft\nrelated_requirements: [REQ-001]",
             "# TEST-001 - Test\n\n## Test Case\n\nBody",
         );
+        write_artifact(
+            &root,
+            "features",
+            "FEATURE-001-a.md",
+            "id: FEATURE-001\ntitle: Feature\nstatus: Draft\nrelated_requirements: [REQ-001]",
+            "# FEATURE-001 - Feature\n\n## Feature\n\nBody",
+        );
 
         let artifacts = load_artifacts_unsorted(&repo).unwrap();
         let req = find_artifact(&repo, "REQ-001").unwrap().unwrap();
@@ -909,15 +970,25 @@ mod tests {
         )
         .unwrap();
         assert!(show.contains("Related:"), "{show}");
+        assert!(show.contains("Features:"), "{show}");
         assert!(show.contains("Stories:"), "{show}");
         assert!(show.contains("ADRs:"), "{show}");
         assert!(show.contains("Tests:"), "{show}");
+        assert!(show.contains("- FEATURE-001 - Feature [Draft]"), "{show}");
         assert!(show.contains("- ADR-001 - Adr [Draft]"), "{show}");
 
         let relations = render_artifact_direct_relations(&repo, &req).unwrap();
         assert!(relations.contains("Relations:"), "{relations}");
         assert!(
             relations.contains("-> related_adrs: ADR-001"),
+            "{relations}"
+        );
+        assert!(
+            relations.contains("-> related_features: FEATURE-001"),
+            "{relations}"
+        );
+        assert!(
+            relations.contains("<- related_requirements: FEATURE-001"),
             "{relations}"
         );
         assert!(
@@ -940,5 +1011,45 @@ mod tests {
 
         let gaps = render_gaps(&repo).unwrap();
         assert!(gaps.is_empty());
+    }
+
+    #[test]
+    fn validate_fix_repairs_misplaced_relationships() {
+        let root = temp_dir();
+        with_cwd(&root, || {
+            assert_eq!(
+                run(vec!["req".into(), "new".into(), "Requirement".into()]).unwrap(),
+                0
+            );
+            assert_eq!(
+                run(vec!["feature".into(), "new".into(), "Feature".into()]).unwrap(),
+                0
+            );
+            fs::write(
+                root.join(".lore/requirements/REQ-001-requirement.md"),
+                "---\nid: REQ-001\ntitle: Requirement\nstatus: Draft\nrelated_requirements: [FEATURE-001]\nrelated_adrs: []\nrelated_stories: []\nrelated_tests: []\n---\n\n# REQ-001 - Requirement\n\n## Requirement\n\nTBD\n\n## Rationale\n\nTBD\n\n## Acceptance Criteria\n\n- [ ] TBD\n",
+            )
+            .unwrap();
+
+            assert_eq!(run(vec!["validate".into()]).unwrap(), 1);
+            assert_eq!(run(vec!["validate".into(), "--fix".into()]).unwrap(), 0);
+            assert_eq!(run(vec!["validate".into()]).unwrap(), 0);
+        });
+
+        let req =
+            fs::read_to_string(root.join(".lore/requirements/REQ-001-requirement.md")).unwrap();
+        assert!(req.contains("related_features:\n  - FEATURE-001"), "{req}");
+        assert!(
+            !req.contains("related_requirements:\n  - FEATURE-001"),
+            "{req}"
+        );
+    }
+
+    #[test]
+    fn validate_prompt_text_is_stable() {
+        assert_eq!(
+            relationship_repair_prompt(),
+            "Legacy artifact relationships found.\nMove them to the correct relationship fields? [Y/n]"
+        );
     }
 }

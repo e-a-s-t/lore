@@ -56,9 +56,22 @@ impl ArtifactKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RelationField {
     Requirements,
+    Features,
     Adrs,
     Stories,
     Tests,
+}
+
+impl RelationField {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            RelationField::Requirements => "related_requirements",
+            RelationField::Features => "related_features",
+            RelationField::Adrs => "related_adrs",
+            RelationField::Stories => "related_stories",
+            RelationField::Tests => "related_tests",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,6 +121,9 @@ pub struct Artifact {
 impl Artifact {
     pub fn relation_groups(&self) -> Vec<(&'static str, Vec<String>)> {
         let mut groups = Vec::new();
+        if !self.meta.related_features.is_empty() {
+            groups.push(("Features", self.meta.related_features.clone()));
+        }
         if !self.meta.related_requirements.is_empty() {
             groups.push(("Requirements", self.meta.related_requirements.clone()));
         }
@@ -124,7 +140,7 @@ impl Artifact {
     }
 }
 
-fn artifact_kind(artifact: &Artifact) -> Option<ArtifactKind> {
+pub(crate) fn artifact_kind(artifact: &Artifact) -> Option<ArtifactKind> {
     let dir = artifact.path.parent()?.file_name()?.to_str()?;
     match dir {
         "requirements" => Some(ArtifactKind::Requirement),
@@ -136,73 +152,27 @@ fn artifact_kind(artifact: &Artifact) -> Option<ArtifactKind> {
     }
 }
 
-fn resolve_relationship(
-    left: ArtifactKind,
-    right: ArtifactKind,
-) -> Result<(RelationField, RelationField), LoreError> {
-    if left == right {
-        return Err(LoreError::UnsupportedRelationship {
-            left: left.plural_label().to_string(),
-            right: right.plural_label().to_string(),
-        });
+pub(crate) fn relation_field_for_kind(kind: ArtifactKind) -> RelationField {
+    match kind {
+        ArtifactKind::Requirement => RelationField::Requirements,
+        ArtifactKind::Story => RelationField::Stories,
+        ArtifactKind::Adr => RelationField::Adrs,
+        ArtifactKind::Test => RelationField::Tests,
+        ArtifactKind::Feature => RelationField::Features,
     }
-
-    Ok(match (left, right) {
-        (ArtifactKind::Requirement, ArtifactKind::Story) => {
-            (RelationField::Stories, RelationField::Requirements)
-        }
-        (ArtifactKind::Story, ArtifactKind::Requirement) => {
-            (RelationField::Requirements, RelationField::Stories)
-        }
-        (ArtifactKind::Requirement, ArtifactKind::Adr) => {
-            (RelationField::Adrs, RelationField::Requirements)
-        }
-        (ArtifactKind::Adr, ArtifactKind::Requirement) => {
-            (RelationField::Requirements, RelationField::Adrs)
-        }
-        (ArtifactKind::Requirement, ArtifactKind::Test) => {
-            (RelationField::Tests, RelationField::Requirements)
-        }
-        (ArtifactKind::Test, ArtifactKind::Requirement) => {
-            (RelationField::Requirements, RelationField::Tests)
-        }
-        (ArtifactKind::Requirement, ArtifactKind::Feature) => {
-            (RelationField::Requirements, RelationField::Requirements)
-        }
-        (ArtifactKind::Feature, ArtifactKind::Requirement) => {
-            (RelationField::Requirements, RelationField::Requirements)
-        }
-        (ArtifactKind::Story, ArtifactKind::Adr) => (RelationField::Adrs, RelationField::Stories),
-        (ArtifactKind::Adr, ArtifactKind::Story) => (RelationField::Stories, RelationField::Adrs),
-        (ArtifactKind::Story, ArtifactKind::Test) => (RelationField::Tests, RelationField::Stories),
-        (ArtifactKind::Test, ArtifactKind::Story) => (RelationField::Stories, RelationField::Tests),
-        (ArtifactKind::Story, ArtifactKind::Feature) => {
-            (RelationField::Requirements, RelationField::Stories)
-        }
-        (ArtifactKind::Feature, ArtifactKind::Story) => {
-            (RelationField::Stories, RelationField::Requirements)
-        }
-        (ArtifactKind::Adr, ArtifactKind::Test) => (RelationField::Tests, RelationField::Adrs),
-        (ArtifactKind::Test, ArtifactKind::Adr) => (RelationField::Adrs, RelationField::Tests),
-        (ArtifactKind::Adr, ArtifactKind::Feature) => {
-            (RelationField::Requirements, RelationField::Adrs)
-        }
-        (ArtifactKind::Feature, ArtifactKind::Adr) => {
-            (RelationField::Adrs, RelationField::Requirements)
-        }
-        (ArtifactKind::Test, ArtifactKind::Feature) => {
-            (RelationField::Requirements, RelationField::Tests)
-        }
-        (ArtifactKind::Feature, ArtifactKind::Test) => {
-            (RelationField::Tests, RelationField::Requirements)
-        }
-        _ => unreachable!("unsupported relationship matrix entry"),
-    })
 }
 
-fn relation_ids_mut(meta: &mut Frontmatter, field: RelationField) -> &mut Vec<String> {
+fn resolve_relationship(left: ArtifactKind, right: ArtifactKind) -> (RelationField, RelationField) {
+    (
+        relation_field_for_kind(right),
+        relation_field_for_kind(left),
+    )
+}
+
+pub(crate) fn relation_ids_mut(meta: &mut Frontmatter, field: RelationField) -> &mut Vec<String> {
     match field {
         RelationField::Requirements => &mut meta.related_requirements,
+        RelationField::Features => &mut meta.related_features,
         RelationField::Adrs => &mut meta.related_adrs,
         RelationField::Stories => &mut meta.related_stories,
         RelationField::Tests => &mut meta.related_tests,
@@ -239,7 +209,12 @@ fn render_relation_field(name: &str, ids: &[String]) -> String {
     }
 }
 
-fn render_artifact_markdown(_kind: ArtifactKind, meta: &Frontmatter, body: &str) -> String {
+pub(crate) fn render_artifact_markdown(
+    _kind: ArtifactKind,
+    meta: &Frontmatter,
+    body: &str,
+) -> String {
+    let related_features = render_relation_field("related_features", &meta.related_features);
     let related_requirements =
         render_relation_field("related_requirements", &meta.related_requirements);
     let related_adrs = render_relation_field("related_adrs", &meta.related_adrs);
@@ -248,10 +223,11 @@ fn render_artifact_markdown(_kind: ArtifactKind, meta: &Frontmatter, body: &str)
     let body = body.trim_start_matches('\n');
 
     format!(
-        "---\nid: {}\ntitle: {}\nstatus: {}\n{}\n{}\n{}\n{}\n---\n\n{}",
+        "---\nid: {}\ntitle: {}\nstatus: {}\n{}\n{}\n{}\n{}\n{}\n---\n\n{}",
         meta.id,
         meta.title,
         meta.status,
+        related_features,
         related_requirements,
         related_adrs,
         related_stories,
@@ -271,12 +247,8 @@ fn artifact_sections(kind: ArtifactKind) -> &'static str {
         ArtifactKind::Adr => {
             "## Context\n\nTBD\n\n## Decision\n\nTBD\n\n## Consequences\n\nTBD\n\n## Alternatives Considered\n\n- TBD\n"
         }
-        ArtifactKind::Test => {
-            "## Test Case\n\nTBD\n\n## Expected Result\n\nTBD\n"
-        }
-        ArtifactKind::Feature => {
-            "## Feature\n\nTBD\n\n## Included Artifacts\n\n- TBD\n"
-        }
+        ArtifactKind::Test => "## Test Case\n\nTBD\n\n## Expected Result\n\nTBD\n",
+        ArtifactKind::Feature => "## Feature\n\nTBD\n",
     }
 }
 
@@ -337,7 +309,7 @@ fn update_relationship(
     let right_kind = artifact_kind(&right).ok_or_else(|| LoreError::UnknownArtifact {
         id: right_id.to_string(),
     })?;
-    let (left_field, right_field) = resolve_relationship(left_kind, right_kind)?;
+    let (left_field, right_field) = resolve_relationship(left_kind, right_kind);
 
     match op {
         RelationshipOp::Link => {
@@ -406,7 +378,7 @@ pub fn create_artifact(
         let related_kind = artifact_kind(&related).ok_or_else(|| LoreError::UnknownArtifact {
             id: related_id.clone(),
         })?;
-        let (source_field, target_field) = resolve_relationship(kind, related_kind)?;
+        let (source_field, target_field) = resolve_relationship(kind, related_kind);
         add_relation(&mut meta, source_field, &related_id);
 
         let mut updated = related;
@@ -861,8 +833,28 @@ mod create_tests {
         );
         assert_eq!(
             fs::read_to_string(created.path).unwrap(),
-            "---\nid: REQ-001\ntitle: Sample requirement\nstatus: Draft\nrelated_requirements: []\nrelated_adrs: []\nrelated_stories: []\nrelated_tests: []\n---\n\n# REQ-001 - Sample requirement\n\n## Requirement\n\nTBD\n\n## Rationale\n\nTBD\n\n## Acceptance Criteria\n\n- [ ] TBD\n"
+            "---\nid: REQ-001\ntitle: Sample requirement\nstatus: Draft\nrelated_features: []\nrelated_requirements: []\nrelated_adrs: []\nrelated_stories: []\nrelated_tests: []\n---\n\n# REQ-001 - Sample requirement\n\n## Requirement\n\nTBD\n\n## Rationale\n\nTBD\n\n## Acceptance Criteria\n\n- [ ] TBD\n"
         );
+    }
+
+    #[test]
+    fn creates_feature_artifact_with_normal_shape() {
+        let root = temp_root();
+        let created = create_artifact(
+            &root,
+            ArtifactKind::Feature,
+            CreateArtifactOptions {
+                id: None,
+                title: "Sample feature".to_string(),
+                related: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        let text = fs::read_to_string(created.path).unwrap();
+        assert!(text.contains("related_features: []"), "{text}");
+        assert!(!text.contains("Included Artifacts"), "{text}");
+        assert!(text.contains("## Feature"), "{text}");
     }
 
     #[test]
@@ -895,7 +887,7 @@ mod create_tests {
         );
         assert_eq!(
             fs::read_to_string(created.path).unwrap(),
-            "---\nid: STORY-123\ntitle: Sample story\nstatus: Draft\nrelated_requirements:\n  - FEATURE-001\nrelated_adrs: []\nrelated_stories: []\nrelated_tests: []\n---\n\n# STORY-123 - Sample story\n\n## User Story\n\nAs a ...\nI want ...\nSo that ...\n\n## Acceptance Criteria\n\n- [ ] TBD\n"
+            "---\nid: STORY-123\ntitle: Sample story\nstatus: Draft\nrelated_features:\n  - FEATURE-001\nrelated_requirements: []\nrelated_adrs: []\nrelated_stories: []\nrelated_tests: []\n---\n\n# STORY-123 - Sample story\n\n## User Story\n\nAs a ...\nI want ...\nSo that ...\n\n## Acceptance Criteria\n\n- [ ] TBD\n"
         );
     }
 
@@ -1046,10 +1038,7 @@ mod create_tests {
             fs::read_to_string(root.join(".lore/requirements/REQ-001-requirement.md")).unwrap();
         let feature =
             fs::read_to_string(root.join(".lore/features/FEATURE-001-feature.md")).unwrap();
-        assert!(
-            req.contains("related_requirements:\n  - FEATURE-001"),
-            "{req}"
-        );
+        assert!(req.contains("related_features:\n  - FEATURE-001"), "{req}");
         assert!(
             feature.contains("related_requirements:\n  - REQ-001"),
             "{feature}"
@@ -1060,12 +1049,12 @@ mod create_tests {
             fs::read_to_string(root.join(".lore/requirements/REQ-001-requirement.md")).unwrap();
         let feature =
             fs::read_to_string(root.join(".lore/features/FEATURE-001-feature.md")).unwrap();
-        assert!(req.contains("related_requirements: []"), "{req}");
+        assert!(req.contains("related_features: []"), "{req}");
         assert!(feature.contains("related_requirements: []"), "{feature}");
     }
 
     #[test]
-    fn rejects_unsupported_same_kind_relationships() {
+    fn supports_same_kind_relationships() {
         let root = temp_root();
         create_artifact(
             &root,
@@ -1092,10 +1081,18 @@ mod create_tests {
             root: root.clone(),
             lore_dir: root.join(".lore"),
         };
-        let error = link_artifacts(&repo, "REQ-001", "REQ-002").unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "lore: Unsupported relationship: requirements <-> requirements"
+        link_artifacts(&repo, "REQ-001", "REQ-002").unwrap();
+        let first =
+            fs::read_to_string(root.join(".lore/requirements/REQ-001-requirement.md")).unwrap();
+        let second =
+            fs::read_to_string(root.join(".lore/requirements/REQ-002-requirement-2.md")).unwrap();
+        assert!(
+            first.contains("related_requirements:\n  - REQ-002"),
+            "{first}"
+        );
+        assert!(
+            second.contains("related_requirements:\n  - REQ-001"),
+            "{second}"
         );
     }
 }
