@@ -1,12 +1,15 @@
 ---
 id: FEATURE-002
 title: Repository Discovery in lore-core
-status: Accepted
-related_requirements: [REQ-011]
-related_adrs: []
-related_stories: [STORY-005]
-related_tests: [TEST-010]
+status: Implemented
 related_features: []
+related_requirements:
+  - REQ-011
+related_adrs: []
+related_stories:
+  - STORY-005
+related_tests:
+  - TEST-010
 ---
 
 # FEATURE-002: Repository Discovery in lore-core

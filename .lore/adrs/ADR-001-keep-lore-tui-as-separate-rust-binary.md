@@ -1,8 +1,13 @@
 ---
 id: ADR-001
 title: Keep lore-tui as separate Rust binary
-status: Accepted
-related_requirements: [REQ-001, REQ-002, REQ-003, REQ-004]
+status: Implemented
+related_features: []
+related_requirements:
+  - REQ-001
+  - REQ-002
+  - REQ-003
+  - REQ-004
 related_adrs: []
 related_stories: []
 related_tests: []
