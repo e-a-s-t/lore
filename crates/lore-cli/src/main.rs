@@ -2,14 +2,16 @@ use std::{
     collections::HashSet,
     io::{self, IsTerminal, Write},
     process::ExitCode,
+    str::FromStr,
 };
 
 use lore_core::{
-    ArtifactKind, CreateArtifactOptions, ValidationError, create_artifact, discover_repository,
-    find_artifact, init_workspace, link_artifacts, list_artifacts, load_artifacts_unsorted,
-    render_artifact_direct_relations, render_artifact_list, render_artifact_raw,
-    render_artifact_show, render_gaps, render_trace, repair_relationships, search_artifacts,
-    unlink_artifacts, validate_repository,
+    Artifact, ArtifactKind, CreateArtifactOptions, ValidationError, collect_cascade,
+    create_artifact, discover_repository, find_artifact, init_workspace, link_artifacts,
+    list_artifacts, load_artifacts_unsorted, render_artifact_direct_relations,
+    render_artifact_list, render_artifact_raw, render_artifact_show, render_gaps, render_trace,
+    repair_relationships, search_artifacts, unlink_artifacts, update_status, validate_repository,
+    Status,
 };
 
 fn main() -> ExitCode {
@@ -32,6 +34,7 @@ fn run(args: Vec<String>) -> Result<i32, String> {
         Some("search") => search(&args[1..]),
         Some("trace") => trace(&args[1..]),
         Some("gaps") => gaps(&args[1..]),
+        Some("status") => status(&args[1..]),
         Some("req") => run_artifact(ArtifactKind::Requirement, &args[1..]),
         Some("story") => run_artifact(ArtifactKind::Story, &args[1..]),
         Some("adr") => run_artifact(ArtifactKind::Adr, &args[1..]),
@@ -71,6 +74,7 @@ fn print_help() {
     println!("  lore search <query>  search artifacts");
     println!("  lore trace  show requirement traceability");
     println!("  lore gaps  show missing links");
+    println!("  lore status <id> <status>  change artifact status");
     println!();
     println!("Relationships");
     println!("  lore link <id1> <id2>  link two artifacts");
@@ -234,6 +238,40 @@ fn relationship(kind: RelationshipKind, args: &[String]) -> Result<i32, String> 
                 RelationshipKind::Unlink => {
                     unlink_artifacts(&repository, &left_id, &right_id)
                         .map_err(|error| error.to_string())?;
+                }
+            }
+            Ok(0)
+        }
+    }
+}
+
+struct StatusOptions {
+    id: String,
+    status: Status,
+    cascade: bool,
+}
+
+fn status(args: &[String]) -> Result<i32, String> {
+    match parse_status_args(args)? {
+        None => {
+            print_status_help();
+            Ok(0)
+        }
+        Some(options) => {
+            let repository = discover_repository().map_err(|error| error.to_string())?;
+            let artifact = find_artifact(&repository, &options.id)
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| format!("lore status: missing artifact {}", options.id))?;
+            update_status(&repository, &options.id, options.status, options.cascade)
+                .map_err(|error| error.to_string())?;
+            println!("Updated {} to {}", options.id, options.status);
+            if options.cascade && is_feature_artifact(&artifact) {
+                let related = collect_cascade(&repository, &artifact)
+                    .map_err(|error| error.to_string())?;
+                let report = render_status_related(&related);
+                if !report.is_empty() {
+                    println!();
+                    println!("{report}");
                 }
             }
             Ok(0)
@@ -569,6 +607,20 @@ fn print_unlink_help() {
     println!("  -h, --help  display help for command");
 }
 
+fn print_status_help() {
+    println!("Usage: lore status [options] <id> <status>");
+    println!();
+    println!("change artifact status");
+    println!();
+    println!("Arguments:");
+    println!("  id          artifact id");
+    println!("  status      one of: {}", status_choices());
+    println!();
+    println!("Options:");
+    println!("  --cascade   cascade to directly related artifacts for features");
+    println!("  -h, --help  display help for command");
+}
+
 fn parse_relationship_args(args: &[String]) -> Result<Option<(String, String)>, String> {
     if args.iter().any(|arg| arg == "--help" || arg == "-h") {
         return Ok(None);
@@ -587,6 +639,97 @@ fn parse_relationship_args(args: &[String]) -> Result<Option<(String, String)>, 
         1 => Err("error: missing required argument 'id2'".to_string()),
         _ => Ok(Some((ids[0].clone(), ids[1].clone()))),
     }
+}
+
+fn parse_status_args(args: &[String]) -> Result<Option<StatusOptions>, String> {
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        return Ok(None);
+    }
+
+    let mut cascade = false;
+    let mut positional = Vec::new();
+
+    for arg in args {
+        match arg.as_str() {
+            "--cascade" => cascade = true,
+            value if value.starts_with('-') => return Err(format!("unknown option `{value}`")),
+            value => positional.push(value.to_string()),
+        }
+    }
+
+    match positional.as_slice() {
+        [] => Err("error: missing required argument 'id'".to_string()),
+        [_id] => Err("error: missing required argument 'status'".to_string()),
+        [id, status, rest @ ..] => {
+            if !rest.is_empty() {
+                return Err(format!("unexpected argument `{}`", rest[0]));
+            }
+            let status = Status::from_str(status)?;
+            Ok(Some(StatusOptions {
+                id: id.clone(),
+                status,
+                cascade,
+            }))
+        }
+    }
+}
+
+fn status_choices() -> String {
+    Status::ALL
+        .iter()
+        .map(|status| status.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn is_feature_artifact(artifact: &Artifact) -> bool {
+    artifact
+        .path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
+        == Some("features")
+}
+
+fn render_status_related(artifacts: &[Artifact]) -> String {
+    let mut lines = Vec::new();
+    let groups = [
+        ("Requirements", "requirements"),
+        ("Stories", "stories"),
+        ("ADRs", "adrs"),
+        ("Tests", "tests"),
+    ];
+
+    for (label, folder) in groups {
+        let mut items = artifacts
+            .iter()
+            .filter(|artifact| is_artifact_in_folder(artifact, folder))
+            .collect::<Vec<_>>();
+        if items.is_empty() {
+            continue;
+        }
+        if lines.is_empty() {
+            lines.push("Related:".to_string());
+        }
+        lines.push(format!("{label}:"));
+        for artifact in items.drain(..) {
+            lines.push(format!(
+                "- {} - {} [{}]",
+                artifact.meta.id, artifact.meta.title, artifact.meta.status
+            ));
+        }
+    }
+
+    lines.join("\n")
+}
+
+fn is_artifact_in_folder(artifact: &Artifact, folder: &str) -> bool {
+    artifact
+        .path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
+        == Some(folder)
 }
 
 fn validate(args: &[String]) -> Result<bool, String> {
@@ -691,7 +834,10 @@ mod tests {
     }
 
     fn with_cwd<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
-        let _guard = CWD_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap();
+        let _guard = CWD_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         let old = std::env::current_dir().unwrap();
         std::env::set_current_dir(dir).unwrap();
         let result = f();
@@ -1051,5 +1197,115 @@ mod tests {
             relationship_repair_prompt(),
             "Legacy artifact relationships found.\nMove them to the correct relationship fields? [Y/n]"
         );
+    }
+
+    #[test]
+    fn status_command_updates_only_target_by_default() {
+        let root = temp_dir();
+        with_cwd(&root, || {
+            assert_eq!(
+                run(vec!["feature".into(), "new".into(), "Feature".into()]).unwrap(),
+                0
+            );
+            assert_eq!(
+                run(vec!["req".into(), "new".into(), "Requirement".into()]).unwrap(),
+                0
+            );
+            assert_eq!(
+                run(vec![
+                    "feature".into(),
+                    "new".into(),
+                    "--related".into(),
+                    "REQ-001".into(),
+                    "Linked feature".into(),
+                ])
+                .unwrap(),
+                0
+            );
+            assert_eq!(
+                run(vec!["status".into(), "FEATURE-001".into(), "Accepted".into()]).unwrap(),
+                0
+            );
+        });
+
+        let feature =
+            fs::read_to_string(root.join(".lore/features/FEATURE-001-feature.md")).unwrap();
+        let req =
+            fs::read_to_string(root.join(".lore/requirements/REQ-001-requirement.md")).unwrap();
+        assert!(feature.contains("status: Accepted"), "{feature}");
+        assert!(req.contains("status: Draft"), "{req}");
+    }
+
+    #[test]
+    fn status_command_rejects_invalid_status() {
+        let root = temp_dir();
+        with_cwd(&root, || {
+            assert_eq!(
+                run(vec!["feature".into(), "new".into(), "Feature".into()]).unwrap(),
+                0
+            );
+            let error = run(vec![
+                "status".into(),
+                "FEATURE-001".into(),
+                "Broken".into(),
+            ])
+            .unwrap_err();
+            assert!(error.contains("invalid status `Broken`"), "{error}");
+            assert!(error.contains("Draft"), "{error}");
+            assert!(error.contains("Deprecated"), "{error}");
+        });
+    }
+
+    #[test]
+    fn status_command_renders_related_artifacts_for_feature_cascade() {
+        let root = temp_dir();
+        with_cwd(&root, || {
+            assert_eq!(
+                run(vec!["feature".into(), "new".into(), "Feature".into()]).unwrap(),
+                0
+            );
+            assert_eq!(
+                run(vec!["req".into(), "new".into(), "Req".into()]).unwrap(),
+                0
+            );
+            assert_eq!(
+                run(vec!["story".into(), "new".into(), "Story".into()]).unwrap(),
+                0
+            );
+            assert_eq!(
+                run(vec!["adr".into(), "new".into(), "Adr".into()]).unwrap(),
+                0
+            );
+            assert_eq!(
+                run(vec!["test".into(), "new".into(), "Test".into()]).unwrap(),
+                0
+            );
+            assert_eq!(
+                run(vec![
+                    "feature".into(),
+                    "new".into(),
+                    "--related".into(),
+                    "REQ-001".into(),
+                    "--related".into(),
+                    "STORY-001".into(),
+                    "--related".into(),
+                    "ADR-001".into(),
+                    "--related".into(),
+                    "TEST-001".into(),
+                    "Linked".into(),
+                ])
+                .unwrap(),
+                0
+            );
+
+            let repository = discover_repository().unwrap();
+            let feature = find_artifact(&repository, "FEATURE-002").unwrap().unwrap();
+            let related = collect_cascade(&repository, &feature).unwrap();
+            let report = render_status_related(&related);
+            assert_eq!(
+                report,
+                "Related:\nRequirements:\n- REQ-001 - Req [Draft]\nStories:\n- STORY-001 - Story [Draft]\nADRs:\n- ADR-001 - Adr [Draft]\nTests:\n- TEST-001 - Test [Draft]"
+            );
+        });
     }
 }

@@ -7,6 +7,7 @@ use serde::Deserialize;
 use walkdir::WalkDir;
 
 use crate::repository::{LoreError, Repository};
+use crate::status::Status;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactKind {
@@ -98,7 +99,7 @@ pub struct Frontmatter {
     #[serde(default)]
     pub title: String,
     #[serde(default)]
-    pub status: String,
+    pub status: Status,
     #[serde(default)]
     pub related_requirements: Vec<String>,
     #[serde(default)]
@@ -273,6 +274,16 @@ fn write_artifact_file(path: &Path, content: &str) -> Result<(), LoreError> {
     })
 }
 
+pub(crate) fn write_artifact(artifact: &Artifact) -> Result<(), LoreError> {
+    let kind = artifact_kind(artifact).ok_or_else(|| LoreError::UnknownArtifact {
+        id: artifact.meta.id.clone(),
+    })?;
+    write_artifact_file(
+        &artifact.path,
+        &render_artifact_markdown(kind, &artifact.meta, &artifact.body),
+    )
+}
+
 pub fn init_workspace(root: &Path) -> Result<InitializedWorkspace, LoreError> {
     let lore_dir = root.join(".lore");
     fs::create_dir_all(&lore_dir).map_err(|source| LoreError::Io {
@@ -362,7 +373,7 @@ pub fn create_artifact(
     let mut meta = Frontmatter {
         id: id.clone(),
         title: options.title.clone(),
-        status: "Draft".to_string(),
+        status: Status::Draft,
         ..Frontmatter::default()
     };
     let mut updates = Vec::new();
@@ -418,6 +429,32 @@ pub fn unlink_artifacts(
     update_relationship(repository, left_id, right_id, RelationshipOp::Unlink)
 }
 
+pub fn update_status(
+    repository: &Repository,
+    artifact_id: &str,
+    status: Status,
+    cascade: bool,
+) -> Result<(), LoreError> {
+    let mut artifact =
+        find_artifact(repository, artifact_id)?.ok_or_else(|| LoreError::UnknownArtifact {
+            id: artifact_id.to_string(),
+        })?;
+
+    if update_single_artifact(&mut artifact, status) {
+        write_artifact(&artifact)?;
+    }
+
+    if cascade && artifact_kind(&artifact) == Some(ArtifactKind::Feature) {
+        for mut related in collect_cascade(repository, &artifact)? {
+            if update_single_artifact(&mut related, status) {
+                write_artifact(&related)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub fn list_artifacts(
     repository: &Repository,
     kind: ArtifactKind,
@@ -446,6 +483,43 @@ pub fn load_artifacts(repository: &Repository) -> Result<Vec<Artifact>, LoreErro
     let mut artifacts = load_artifacts_unsorted(repository)?;
     artifacts.sort_by(|a, b| a.meta.id.cmp(&b.meta.id).then_with(|| a.path.cmp(&b.path)));
     Ok(artifacts)
+}
+
+fn update_single_artifact(artifact: &mut Artifact, status: Status) -> bool {
+    if artifact.meta.status == status {
+        return false;
+    }
+
+    artifact.meta.status = status;
+    true
+}
+
+pub fn collect_cascade(
+    repository: &Repository,
+    feature: &Artifact,
+) -> Result<Vec<Artifact>, LoreError> {
+    let mut related = Vec::new();
+    related.extend(collect_related(repository, &feature.meta.related_requirements)?);
+    related.extend(collect_related(repository, &feature.meta.related_stories)?);
+    related.extend(collect_related(repository, &feature.meta.related_adrs)?);
+    related.extend(collect_related(repository, &feature.meta.related_tests)?);
+    Ok(related)
+}
+
+fn collect_related(repository: &Repository, ids: &[String]) -> Result<Vec<Artifact>, LoreError> {
+    let mut ids = ids.to_vec();
+    ids.sort();
+    ids.dedup();
+
+    let mut related = Vec::new();
+    for id in ids {
+        let artifact = find_artifact(repository, &id)?.ok_or_else(|| LoreError::UnknownArtifact {
+            id: id.clone(),
+        })?;
+        related.push(artifact);
+    }
+
+    Ok(related)
 }
 
 pub fn load_artifacts_unsorted(repository: &Repository) -> Result<Vec<Artifact>, LoreError> {
@@ -1094,5 +1168,241 @@ mod create_tests {
             second.contains("related_requirements:\n  - REQ-001"),
             "{second}"
         );
+    }
+}
+
+#[cfg(test)]
+mod status_tests {
+    use super::*;
+    use crate::status::Status;
+    use std::{
+        fs,
+        path::Path,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn temp_root() -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "lore-core-status-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    fn repo(root: &Path) -> Repository {
+        Repository {
+            root: root.to_path_buf(),
+            lore_dir: root.join(".lore"),
+        }
+    }
+
+    #[test]
+    fn updates_single_artifact_status_only() {
+        let root = temp_root();
+        create_artifact(
+            &root,
+            ArtifactKind::Requirement,
+            CreateArtifactOptions {
+                id: Some("REQ-001".to_string()),
+                title: "Requirement".to_string(),
+                related: Vec::new(),
+            },
+        )
+        .unwrap();
+
+        update_status(&repo(&root), "REQ-001", Status::Accepted, false).unwrap();
+
+        let text =
+            fs::read_to_string(root.join(".lore/requirements/REQ-001-requirement.md")).unwrap();
+        assert!(text.contains("status: Accepted"), "{text}");
+        assert!(text.contains("## Requirement"), "{text}");
+        assert!(text.contains("related_features: []"), "{text}");
+    }
+
+    #[test]
+    fn rejects_unknown_artifact_id() {
+        let root = temp_root();
+        fs::create_dir_all(root.join(".lore")).unwrap();
+
+        let error = update_status(&repo(&root), "REQ-404", Status::Accepted, false).unwrap_err();
+        assert!(matches!(error, LoreError::UnknownArtifact { id } if id == "REQ-404"));
+    }
+
+    #[test]
+    fn collects_cascade_in_deterministic_group_order() {
+        let root = temp_root();
+        create_artifact(
+            &root,
+            ArtifactKind::Requirement,
+            CreateArtifactOptions {
+                id: Some("REQ-010".to_string()),
+                title: "Requirement 10".to_string(),
+                related: Vec::new(),
+            },
+        )
+        .unwrap();
+        create_artifact(
+            &root,
+            ArtifactKind::Requirement,
+            CreateArtifactOptions {
+                id: Some("REQ-002".to_string()),
+                title: "Requirement 2".to_string(),
+                related: Vec::new(),
+            },
+        )
+        .unwrap();
+        create_artifact(
+            &root,
+            ArtifactKind::Story,
+            CreateArtifactOptions {
+                id: Some("STORY-020".to_string()),
+                title: "Story 20".to_string(),
+                related: Vec::new(),
+            },
+        )
+        .unwrap();
+        create_artifact(
+            &root,
+            ArtifactKind::Story,
+            CreateArtifactOptions {
+                id: Some("STORY-001".to_string()),
+                title: "Story 1".to_string(),
+                related: Vec::new(),
+            },
+        )
+        .unwrap();
+        create_artifact(
+            &root,
+            ArtifactKind::Adr,
+            CreateArtifactOptions {
+                id: Some("ADR-020".to_string()),
+                title: "Adr 20".to_string(),
+                related: Vec::new(),
+            },
+        )
+        .unwrap();
+        create_artifact(
+            &root,
+            ArtifactKind::Adr,
+            CreateArtifactOptions {
+                id: Some("ADR-003".to_string()),
+                title: "Adr 3".to_string(),
+                related: Vec::new(),
+            },
+        )
+        .unwrap();
+        create_artifact(
+            &root,
+            ArtifactKind::Test,
+            CreateArtifactOptions {
+                id: Some("TEST-200".to_string()),
+                title: "Test 200".to_string(),
+                related: Vec::new(),
+            },
+        )
+        .unwrap();
+        create_artifact(
+            &root,
+            ArtifactKind::Test,
+            CreateArtifactOptions {
+                id: Some("TEST-010".to_string()),
+                title: "Test 10".to_string(),
+                related: Vec::new(),
+            },
+        )
+        .unwrap();
+        create_artifact(
+            &root,
+            ArtifactKind::Feature,
+            CreateArtifactOptions {
+                id: Some("FEATURE-001".to_string()),
+                title: "Feature".to_string(),
+                related: vec![
+                    "TEST-200".to_string(),
+                    "REQ-010".to_string(),
+                    "ADR-020".to_string(),
+                    "STORY-020".to_string(),
+                    "REQ-002".to_string(),
+                    "STORY-001".to_string(),
+                    "ADR-003".to_string(),
+                    "TEST-010".to_string(),
+                ],
+            },
+        )
+        .unwrap();
+
+        let artifacts = load_artifacts_unsorted(&repo(&root)).unwrap();
+        let feature = artifacts
+            .into_iter()
+            .find(|artifact| artifact.meta.id == "FEATURE-001")
+            .unwrap();
+        let cascade = collect_cascade(&repo(&root), &feature).unwrap();
+        let ids = cascade
+            .iter()
+            .map(|artifact| artifact.meta.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            vec![
+                "REQ-002",
+                "REQ-010",
+                "STORY-001",
+                "STORY-020",
+                "ADR-003",
+                "ADR-020",
+                "TEST-010",
+                "TEST-200",
+            ]
+        );
+    }
+
+    #[test]
+    fn cascade_updates_direct_relations_only() {
+        let root = temp_root();
+        create_artifact(
+            &root,
+            ArtifactKind::Story,
+            CreateArtifactOptions {
+                id: Some("STORY-999".to_string()),
+                title: "Nested story".to_string(),
+                related: Vec::new(),
+            },
+        )
+        .unwrap();
+        create_artifact(
+            &root,
+            ArtifactKind::Requirement,
+            CreateArtifactOptions {
+                id: Some("REQ-001".to_string()),
+                title: "Requirement".to_string(),
+                related: vec!["STORY-999".to_string()],
+            },
+        )
+        .unwrap();
+        create_artifact(
+            &root,
+            ArtifactKind::Feature,
+            CreateArtifactOptions {
+                id: Some("FEATURE-001".to_string()),
+                title: "Feature".to_string(),
+                related: vec!["REQ-001".to_string()],
+            },
+        )
+        .unwrap();
+
+        update_status(&repo(&root), "FEATURE-001", Status::Accepted, true).unwrap();
+
+        let feature =
+            fs::read_to_string(root.join(".lore/features/FEATURE-001-feature.md")).unwrap();
+        let req =
+            fs::read_to_string(root.join(".lore/requirements/REQ-001-requirement.md")).unwrap();
+        let story = fs::read_to_string(root.join(".lore/stories/STORY-999-nested-story.md")).unwrap();
+        assert!(feature.contains("status: Accepted"), "{feature}");
+        assert!(req.contains("status: Accepted"), "{req}");
+        assert!(story.contains("status: Draft"), "{story}");
     }
 }
